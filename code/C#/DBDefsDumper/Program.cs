@@ -1,8 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.IO.MemoryMappedFiles;
 using System.Linq;
+using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
@@ -500,8 +502,33 @@ namespace DBDefsDumper
                     Directory.CreateDirectory(outputDirectory);
                 }
 
+                var writer = new StreamWriter(Path.Combine(outputDirectory, "DB2Metadata.h"));
+
+                writer.WriteLine("/*");
+                writer.WriteLine(" * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information");
+                writer.WriteLine(" *");
+                writer.WriteLine(" * This program is free software; you can redistribute it and/or modify it");
+                writer.WriteLine(" * under the terms of the GNU General Public License as published by the");
+                writer.WriteLine(" * Free Software Foundation; either version 2 of the License, or (at your");
+                writer.WriteLine(" * option) any later version.");
+                writer.WriteLine(" *");
+                writer.WriteLine(" * This program is distributed in the hope that it will be useful, but WITHOUT");
+                writer.WriteLine(" * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or");
+                writer.WriteLine(" * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for");
+                writer.WriteLine(" * more details.");
+                writer.WriteLine(" *");
+                writer.WriteLine(" * You should have received a copy of the GNU General Public License along");
+                writer.WriteLine(" * with this program. If not, see <http://www.gnu.org/licenses/>.");
+                writer.WriteLine(" */");
+                writer.WriteLine("");
+                writer.WriteLine("#ifndef DB2Metadata_h__");
+                writer.WriteLine("#define DB2Metadata_h__");
+                writer.WriteLine("");
+                writer.WriteLine("#include \"DB2Meta.h\"");
+                writer.WriteLine("");
+
                 // Process DBMetas
-                foreach (var meta in metas)
+                foreach (var meta in metas.OrderBy(x => x.Key))
                 {
                     if ((long)translate((ulong)meta.Value.field_offsets_offs) > bin.BaseStream.Length)
                     {
@@ -522,260 +549,145 @@ namespace DBDefsDumper
                     //    }
                     //}
 
-                    var writer = new StreamWriter(Path.Combine(outputDirectory, meta.Key + ".dbd"));
-
-                    writer.WriteLine("COLUMNS");
-
-                    Console.Write("Writing " + meta.Key + ".dbd..");
-
-                    var fieldCount = 0;
-                    if (meta.Value.num_fields == 0 && meta.Value.num_fields_in_file != 0)
                     {
-                        fieldCount = meta.Value.num_fields_in_file;
-                    }
-                    else
-                    {
-                        fieldCount = meta.Value.num_fields;
-                    }
+                        Console.WriteLine("Writing " + meta.Key + "Meta..");
 
-                    var field_offsets = ReadFieldArray(bin, fieldCount, (long)translate((ulong)meta.Value.field_offsets_offs)); // TODO: Field offsets is currently unused, use to verify sizes
-                    var field_sizes = ReadFieldArray(bin, fieldCount, (long)translate((ulong)meta.Value.field_sizes_offs));
-                    var field_types = ReadFieldArray(bin, fieldCount, (long)translate((ulong)meta.Value.field_types_offs));
-
-                    var field_flags = new List<int>();
-                    if ((build.StartsWith("7.3.0.") || build.StartsWith("7.3.2.")) && (long)translate((ulong)meta.Value.field_flags_offs) > bin.BaseStream.Length)
-                    {
-                        for (var fc = 0; fc < fieldCount; fc++)
+                        var fieldCount = 0;
+                        if (meta.Value.num_fields == 0 && meta.Value.num_fields_in_file != 0)
                         {
-                            field_flags.Add(0);
-                        }
-                    }
-                    else
-                    {
-                        field_flags = ReadFieldArray(bin, fieldCount, (long)translate((ulong)meta.Value.field_flags_offs));
-                    }
-                    var field_sizes_in_file = ReadFieldArray(bin, fieldCount, (long)translate((ulong)meta.Value.field_sizes_in_file_offs));
-                    var field_types_in_file = ReadFieldArray(bin, fieldCount, (long)translate((ulong)meta.Value.field_types_in_file_offs));
-                    var field_flags_in_file = ReadFieldArray(bin, fieldCount, (long)translate((ulong)meta.Value.field_flags_in_file_offs));
-                    var field_names_in_file = ReadFieldOffsetArray(bin, fieldCount, (long)translate((ulong)meta.Value.namesInFileOffs));
-
-                    if (meta.Value.id_column == -1)
-                    {
-                        writer.WriteLine("int ID");
-                    }
-
-                    var columnNames = new List<string>();
-                    var columnTypeFlags = new List<Tuple<int, int>>();
-
-                    for (var i = 0; i < meta.Value.num_fields_in_file; i++)
-                    {
-                        if (field_flags_in_file.Count == 0)
-                        {
-                            columnTypeFlags.Add(new Tuple<int, int>(field_types_in_file[i], 0));
+                            fieldCount = meta.Value.num_fields_in_file;
                         }
                         else
                         {
-                            columnTypeFlags.Add(new Tuple<int, int>(field_types_in_file[i], field_flags_in_file[i]));
-                        }
-                    }
-
-                    if (meta.Value.num_fields != 0 && (meta.Value.num_fields_in_file != meta.Value.num_fields))
-                    {
-                        if (meta.Value.num_fields_in_file > field_flags.Count())
-                        {
-                            columnTypeFlags.Add(new Tuple<int, int>(field_types[meta.Value.num_fields_in_file], 0));
-                        }
-                        else
-                        {
-                            columnTypeFlags.Add(new Tuple<int, int>(field_types[meta.Value.num_fields_in_file], field_flags[meta.Value.num_fields_in_file]));
-                        }
-                    }
-
-                    for (var i = 0; i < columnTypeFlags.Count; i++)
-                    {
-                        if (field_names_in_file.Count > 0)
-                        {
-                            bin.BaseStream.Position = (long)translate(field_names_in_file[i]);
-                            columnNames.Add(CleanRealName(bin.ReadCString()));
-                        }
-                        else
-                        {
-                            columnNames.Add(GenerateName(i, build));
+                            fieldCount = meta.Value.num_fields;
                         }
 
-                        var t = TypeToT(columnTypeFlags[i].Item1, (FieldFlags)columnTypeFlags[i].Item2);
-                        if (field_names_in_file.Count > 0)
+                        writer.WriteLine("struct " + meta.Key + "Meta");
+                        writer.WriteLine("{");
+                        writer.WriteLine("    static constexpr DB2MetaField Fields[" + fieldCount + "] =");
+                        writer.WriteLine("    {");
+
+                        var field_offsets = ReadFieldArray(bin, fieldCount, (long)translate((ulong)meta.Value.field_offsets_offs)); // TODO: Field offsets is currently unused, use to verify sizes
+                        var field_sizes = ReadFieldArray(bin, fieldCount, (long)translate((ulong)meta.Value.field_sizes_offs));
+                        var field_types = ReadFieldArray(bin, fieldCount, (long)translate((ulong)meta.Value.field_types_offs));
+
+                        var field_flags = new List<int>();
+                        if ((build.StartsWith("7.3.0.") || build.StartsWith("7.3.2.")) && (long)translate((ulong)meta.Value.field_flags_offs) > bin.BaseStream.Length)
                         {
-                            if (t.Item1 == "locstring")
+                            for (var fc = 0; fc < fieldCount; fc++)
                             {
-                                writer.WriteLine(t.Item1 + " " + columnNames[i] + "_lang");
+                                field_flags.Add(0);
+                            }
+                        }
+                        else
+                        {
+                            field_flags = ReadFieldArray(bin, fieldCount, (long)translate((ulong)meta.Value.field_flags_offs));
+                        }
+                        var field_sizes_in_file = ReadFieldArray(bin, fieldCount, (long)translate((ulong)meta.Value.field_sizes_in_file_offs));
+                        var field_types_in_file = ReadFieldArray(bin, fieldCount, (long)translate((ulong)meta.Value.field_types_in_file_offs));
+                        var field_flags_in_file = ReadFieldArray(bin, fieldCount, (long)translate((ulong)meta.Value.field_flags_in_file_offs));
+                        var field_names_in_file = ReadFieldOffsetArray(bin, fieldCount, (long)translate((ulong)meta.Value.namesInFileOffs));
+
+                        var determineType = (((string, int) typeFlags, int arraysize, StreamWriter writer, int currentIndex)  =>
+                        {
+                            string outtype = "";
+                            string isSigned = "true";
+                            switch (typeFlags.Item1)
+                            {
+                                case "int": // 0
+                                    outtype = "FT_INT";
+                                    break;
+                                case "uint": // 0
+                                    isSigned = "false";
+                                    outtype = "FT_INT";
+                                    break;
+                                case "long": // 1
+                                    outtype = "FT_LONG";
+                                    break;
+                                case "ulong": // 1
+                                    isSigned = "false";
+                                    outtype = "FT_LONG";
+                                    break;
+                                case "locstring": // 2
+                                    outtype = "FT_STRING";
+                                    break;
+                                case "string": // 2
+                                    outtype = "FT_STRING_NOT_LOCALIZED";
+                                    break;
+                                case "float": // 3
+                                    outtype = "FT_FLOAT";
+                                    break;
+                                case "sbyte": // 4
+                                    outtype = "FT_BYTE";
+                                    break;
+                                case "byte": // 4
+                                    isSigned = "false";
+                                    outtype = "FT_BYTE";
+                                    break;
+                                case "short": // 5
+                                    outtype = "FT_SHORT";
+                                    break;
+                                case "ushort": // 5
+                                    isSigned = "false";
+                                    outtype = "FT_SHORT";
+                                    break;
+                                default:
+                                    Debug.Assert(false);
+                                    break;
+                            }
+
+                            if (currentIndex != -1 && meta.Value.id_column == currentIndex)
+                                isSigned = "false";
+
+                            writer.WriteLine("        { " + outtype + ", " + arraysize + ", " + isSigned + " },");
+                        });
+
+                        for (var i = 0; i < meta.Value.num_fields_in_file; i++)
+                        {
+                            var typeFlags = ("int", 32);
+
+                            if (field_flags_in_file.Count == 0)
+                            {
+                                typeFlags = TypeToT(field_types_in_file[i], 0);
                             }
                             else
                             {
-                                if (t.Item1 == "uint")
-                                {
-                                    writer.WriteLine("int " + columnNames[i]);
-                                }
-                                else
-                                {
-                                    writer.WriteLine(t.Item1 + " " + columnNames[i]);
-                                }
+                                typeFlags = TypeToT(field_types_in_file[i], (FieldFlags)field_flags_in_file[i]);
                             }
+
+                            determineType(typeFlags, field_sizes_in_file[i], writer, i);
                         }
-                        else
+                        
+                        if (meta.Value.num_fields != 0 && (meta.Value.num_fields_in_file != meta.Value.num_fields))
                         {
-                            if (t.Item1 == "locstring")
-                            {
-                                writer.WriteLine(t.Item1 + " " + columnNames[i] + "_lang?");
-                            }
+                            Tuple<int, int> data = null;
+                            if (meta.Value.num_fields_in_file > field_flags.Count())
+                                data = new Tuple<int, int>(field_types[meta.Value.num_fields_in_file], 0);
                             else
-                            {
-                                if (t.Item1 == "uint")
-                                {
-                                    writer.WriteLine("int " + columnNames[i] + "?");
-                                }
-                                else
-                                {
-                                    writer.WriteLine(t.Item1 + " " + columnNames[i] + "?");
-                                }
-                            }
-                        }
-                    }
+                                data = new Tuple<int, int>(field_types[meta.Value.num_fields_in_file], field_flags[meta.Value.num_fields_in_file]);
 
-                    writer.WriteLine();
+                            // var i = meta.Value.num_fields_in_file;
+                            var typeFlags = TypeToT(data.Item1, (FieldFlags)data.Item2);
 
-                    if (meta.Value.layout_hash != 0)
-                    {
-                        writer.WriteLine("LAYOUT " + meta.Value.layout_hash.ToString("X8").ToUpper());
-                    }
-
-                    writer.WriteLine("BUILD " + build);
-
-                    if (meta.Value.sparseTable == 1)
-                    {
-                        writer.WriteLine("COMMENT table is sparse");
-                    }
-
-                    if (meta.Value.id_column == -1)
-                    {
-                        writer.WriteLine("$noninline,id$ID<32>");
-                    }
-
-                    for (var i = 0; i < meta.Value.num_fields_in_file; i++)
-                    {
-                        var typeFlags = ("int", 32);
-
-                        if (field_flags_in_file.Count == 0)
-                        {
-                            typeFlags = TypeToT(field_types_in_file[i], 0);
-                        }
-                        else
-                        {
-                            typeFlags = TypeToT(field_types_in_file[i], (FieldFlags)field_flags_in_file[i]);
+                            determineType(typeFlags, 1, writer, -1);
                         }
 
-                        if (meta.Value.id_column == i)
-                        {
-                            writer.Write("$id$");
-                        }
-
-                        if (meta.Value.has_relation != 0)
-                        {
-                            if (meta.Value.relation_col == i)
-                            {
-                                writer.Write("$relation$");
-                                if (meta.Value.relation_col_in_file != i)
-                                {
-                                    throw new Exception("No relation_col_in_file but there is relation_col send help!");
-                                }
-                            }
-                        }
-
-                        writer.Write(columnNames[i]);
-
-                        if (typeFlags.Item1 == "locstring")
-                        {
-                            writer.Write("_lang");
-                        }
-
-                        if (typeFlags.Item2 > 0)
-                        {
-                            if (typeFlags.Item1 == "uint")
-                            {
-                                writer.Write("<u" + typeFlags.Item2 + ">");
-                            }
-                            else
-                            {
-                                writer.Write("<" + typeFlags.Item2 + ">");
-                            }
-                        }
-
-                        if (field_sizes_in_file[i] != 1)
-                        {
-                            // 6.0.1 has sizes in bytes
-                            if (build.StartsWith("6."))
-                            {
-                                var supposedSize = 0;
-
-                                if ((typeFlags.Item1 == "uint" || typeFlags.Item1 == "int") && typeFlags.Item2 != 32)
-                                {
-                                    supposedSize = typeFlags.Item2 / 8;
-                                }
-                                else
-                                {
-                                    supposedSize = 4;
-                                }
-
-                                var fixedSize = field_sizes_in_file[i] / supposedSize;
-                                if (fixedSize > 1)
-                                {
-                                    writer.Write("[" + fixedSize + "]");
-                                }
-                            }
-                            else
-                            {
-                                writer.Write("[" + field_sizes_in_file[i] + "]");
-                            }
-                        }
-
+                        writer.WriteLine("    };");
+                        writer.WriteLine();
+                        writer.WriteLine(String.Format("    static constexpr DB2Meta Instance{{ {0}, {1}, {2}, {3}, 0x{4:X8}, Fields, {5} }};",
+                            meta.Value.fileDataID, meta.Value.id_column, meta.Value.num_fields, meta.Value.num_fields_in_file, meta.Value.layout_hash, meta.Value.relation_col
+                            ));
+                        writer.WriteLine("};");
                         writer.WriteLine();
                     }
-
-                    if (meta.Value.num_fields != 0 && (meta.Value.num_fields_in_file != meta.Value.num_fields))
-                    {
-                        var i = meta.Value.num_fields_in_file;
-                        var typeFlags = TypeToT(columnTypeFlags[i].Item1, (FieldFlags)columnTypeFlags[i].Item2);
-
-                        writer.Write("$noninline,relation$" + columnNames[i]);
-
-                        if (typeFlags.Item1 == "locstring")
-                        {
-                            writer.Write("_lang");
-                        }
-
-                        if (typeFlags.Item2 > 0)
-                        {
-                            if (typeFlags.Item1 == "uint")
-                            {
-                                writer.Write("<u" + typeFlags.Item2 + ">");
-                            }
-                            else if (typeFlags.Item1 == "int")
-                            {
-                                writer.Write("<" + typeFlags.Item2 + ">");
-                            }
-                        }
-
-                        if (field_sizes[i] != 1)
-                        {
-                            writer.Write("[" + field_sizes[i] + "]");
-                        }
-                    }
-
-                    writer.Flush();
-                    writer.Close();
-
-                    Console.Write("..done!\n");
                 }
+
+                writer.WriteLine("#endif // DB2Metadata_h__");
+
+                writer.Flush();
+                writer.Close();
+
+                Console.Write("..done!"); ;
 
                 if (usedPattern != null && metas.Count > 0)
                 {
@@ -804,7 +716,7 @@ namespace DBDefsDumper
                     }
 
                     File.WriteAllText(build + ".json", JsonSerializer.Serialize(entries.OrderBy(x => x.tableName).ToArray(), new JsonSerializerOptions() { WriteIndented = true }));
-                    Console.Write("..done!\n");
+                    Console.Write("..done!");;
                 }
             }
 
@@ -1063,10 +975,10 @@ namespace DBDefsDumper
                     switch (flag)
                     {
                         case 0 | 0 | 0 | 0:
-                            return ("int", 64);
+                            return ("long", 64);
                         case 0 | FieldFlags.f_unsigned | 0 | 0:
                         case 0 | FieldFlags.f_unsigned | 0 | FieldFlags.f_maybe_fk:
-                            return ("uint", 64);
+                            return ("ulong", 64);
                         default:
                             throw new Exception("Unknown flag combination!");
                     }
@@ -1094,11 +1006,11 @@ namespace DBDefsDumper
                     {
                         case 0 | 0 | 0 | 0:
                         case 0 | 0 | FieldFlags.f_maybe_compressed | 0:
-                            return ("int", 8);
+                            return ("sbyte", 8);
                         case 0 | FieldFlags.f_unsigned | 0 | 0:
                         case 0 | FieldFlags.f_unsigned | FieldFlags.f_maybe_compressed | 0:
                         case 0 | FieldFlags.f_unsigned | FieldFlags.f_maybe_compressed | FieldFlags.f_maybe_fk:
-                            return ("uint", 8);
+                            return ("byte", 8);
                         default:
                             throw new Exception("Unknown flag combination!");
                     }
@@ -1109,12 +1021,12 @@ namespace DBDefsDumper
                         case 0 | 0 | 0 | FieldFlags.f_maybe_fk:
                         case 0 | 0 | FieldFlags.f_maybe_compressed | 0:
                         case 0 | 0 | FieldFlags.f_maybe_compressed | FieldFlags.f_maybe_fk:
-                            return ("int", 16);
+                            return ("short", 16);
                         case 0 | FieldFlags.f_unsigned | 0 | 0:
                         case 0 | FieldFlags.f_unsigned | 0 | FieldFlags.f_maybe_fk:
                         case 0 | FieldFlags.f_unsigned | FieldFlags.f_maybe_compressed | 0:
                         case 0 | FieldFlags.f_unsigned | FieldFlags.f_maybe_compressed | FieldFlags.f_maybe_fk:
-                            return ("uint", 16);
+                            return ("ushort", 16);
                         default:
                             throw new Exception("Unknown flag combination!");
                     }
