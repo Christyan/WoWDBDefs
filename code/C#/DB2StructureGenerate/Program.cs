@@ -250,15 +250,18 @@ enum HotfixDatabaseStatements : uint32
             {
                 string tablename = GetTableName(db2Entry.Key);
                 bool hasLocale = db2Entry.Value.Where(x => x.type == "LocalizedString").Any();
-                stringBuilder.AppendLine(@"HOTFIX_SEL_" + tablename.ToUpper());
-                stringBuilder.AppendLine(@"HOTFIX_SEL_" + tablename.ToUpper() + "_MAX_ID");
+                stringBuilder.AppendLine(@"    HOTFIX_SEL_" + tablename.ToUpper() + ",");
+                stringBuilder.AppendLine(@"    HOTFIX_SEL_" + tablename.ToUpper() + "_MAX_ID,");
                 if (hasLocale)
-                    stringBuilder.AppendLine(@"HOTFIX_SEL_" + tablename.ToUpper() + "_LOCALE");
+                    stringBuilder.AppendLine(@"    HOTFIX_SEL_" + tablename.ToUpper() + "_LOCALE,");
                 stringBuilder.AppendLine();
             }
 
             stringBuilder.AppendLine(@"    MAX_HOTFIXDATABASE_STATEMENTS
 };
+
+uint32 constexpr HOTFIX_MAX_ID_STMT_OFFSET = 1;
+uint32 constexpr HOTFIX_LOCALE_STMT_OFFSET = 2;
 
 class TC_DATABASE_API HotfixDatabaseConnection : public MySQLConnection
 {
