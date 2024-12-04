@@ -34,7 +34,7 @@ namespace DB2StructureGenerate
                 // Console.WriteLine("sdasd a " + filename);
 
                 Queue<DB2FieldInfo> fields = new Queue<DB2FieldInfo>();
-                var result = dbdData.versionDefinitions.Where(x => x.builds.Any(y => y.build == 44833));
+                var result = dbdData.versionDefinitions.Where(x => x.builds.Any(y => y.build == 41510));
                 if (result.Any())
                 {
                     DBDefsLib.Structs.VersionDefinitions versionDef = result.First();
@@ -79,8 +79,30 @@ namespace DB2StructureGenerate
             return result;
         }
 
-        public static Int32 AppendString(ref string output, string addblock, Int32 currentCounter, string seperator)
+        private static string GetTableKeyName(KeyValuePair<string, DB2FieldInfo[]> db2Entry)
         {
+            string keyName = "";
+
+            foreach (var field in db2Entry.Value)
+            {
+                if (field.name == "ID")
+                    return "ID";
+
+                // Use first encountered integer field as backup
+                if (keyName == "" && field.bigType == "FT_INT")
+                    keyName = field.name;
+            }
+
+            if (keyName == "")
+                keyName = "BAD_KEY_NAME";
+
+            return keyName;
+        }
+
+        public static Int32 AppendString(ref string output, string addblock, Int32 currentCounter, string seperator, bool column)
+        {
+            if (column)
+                addblock = $"`{addblock}`";
             bool newLine = ((output + addblock).Length > (150 * currentCounter));
             if (newLine)
             {
@@ -157,37 +179,42 @@ void HotfixDatabaseConnection::DoPrepareStatements()
 
                     if (db2Entry.Value[i].arrlength > 1)
                     {
-                        for (int j = 1; j <= db2Entry.Value[i].arrlength; ++j) 
-                            addedCount = AppendString(ref fields, fieldname + j, addedCount, (i != db2Entry.Value.Length - 1) ? ", " : "");
+                        bool lastField = i == db2Entry.Value.Length - 1;
+                        for (int j = 1; j <= db2Entry.Value[i].arrlength; ++j)
+                        { 
+                            var separator = lastField && j == db2Entry.Value[i].arrlength ? "" : ", ";
+                            addedCount = AppendString(ref fields, fieldname + j, addedCount, separator, true); 
+                        }
                     }
                     else
-                        addedCount = AppendString(ref fields, fieldname, addedCount, (i != db2Entry.Value.Length - 1) ? ", " : "");
+                        addedCount = AppendString(ref fields, fieldname, addedCount, (i != db2Entry.Value.Length - 1) ? ", " : "", true);
                 }
 
-                addedCount = AppendString(ref fields, " FROM " + tablename, addedCount, "");
-                addedCount = AppendString(ref fields, " WHERE (`VerifiedBuild` > 0) = ?" + "\",  CONNECTION_SYNCH);", addedCount, "");
+                addedCount = AppendString(ref fields, " FROM " + $"`{tablename}`", addedCount, "", false);
+                addedCount = AppendString(ref fields, " WHERE (`VerifiedBuild` > 0) = ?" + "\",  CONNECTION_SYNCH);", addedCount, "", false);
 
+                string keyName = GetTableKeyName(db2Entry);
 
                 stringBuilder.AppendLine(fields);
-                stringBuilder.AppendLine(@"    PREPARE_MAX_ID_STMT(HOTFIX_SEL_" + tablename.ToUpper() + @", ""SELECT MAX(ID) + 1 FROM " + tablename + @""", CONNECTION_SYNCH);");
+                stringBuilder.AppendLine(@"    PREPARE_MAX_ID_STMT(HOTFIX_SEL_" + tablename.ToUpper() + $@", ""SELECT MAX({keyName}) + 1 FROM " + $"`{tablename}`" + @""", CONNECTION_SYNCH);");
                 if (locale.Any())
                 {
                     if (tablename.Contains(""))
                     addedCount = 1;
-                    string fields_locale = @"    PREPARE_LOCALE_STMT(HOTFIX_SEL_" + tablename.ToUpper() + @", ""SELECT ID, ";
+                    string fields_locale = @"    PREPARE_LOCALE_STMT(HOTFIX_SEL_" + tablename.ToUpper() + $@", ""SELECT {keyName}, ";
                     for (int i = 0; i < locale.Length; ++i)
                     {
                         string fieldname = locale[i].name;
                         if (locale[i].arrlength > 1)
                         {
                             for (int j = 1; j <= locale[i].arrlength; ++j)
-                                addedCount = AppendString(ref fields_locale, fieldname + j, addedCount, (i != locale.Length - 1) ? ", " : "");
+                                addedCount = AppendString(ref fields_locale, fieldname + j, addedCount, (i != locale.Length - 1) ? ", " : "", true);
                         }
                         else
-                            addedCount = AppendString(ref fields_locale, fieldname, addedCount, (i != locale.Length - 1) ? ", " : "");
+                            addedCount = AppendString(ref fields_locale, fieldname, addedCount, (i != locale.Length - 1) ? ", " : "", true);
                     }
-                    addedCount = AppendString(ref fields_locale, " FROM " + tablename + "_locale", addedCount, "");
-                    addedCount = AppendString(ref fields_locale, @" WHERE (`VerifiedBuild` > 0) = ? AND locale = ?"", CONNECTION_SYNCH);", addedCount, "");
+                    addedCount = AppendString(ref fields_locale, " FROM " + $"`{tablename}_locale`", addedCount, "", false);
+                    addedCount = AppendString(ref fields_locale, @" WHERE (`VerifiedBuild` > 0) = ? AND locale = ?"", CONNECTION_SYNCH);", addedCount, "", false);
                     stringBuilder.AppendLine(fields_locale);
                 }
                 stringBuilder.AppendLine();
@@ -778,7 +805,7 @@ using HotfixDatabasePreparedStatement = PreparedStatement<HotfixDatabaseConnecti
                     stringBuilder.AppendLine(AfterData[entryName]);
                 }
 
-                stringBuilder.AppendLine("}");
+                stringBuilder.AppendLine("};");
                 stringBuilder.AppendLine();
             }
 
@@ -870,56 +897,112 @@ using HotfixDatabasePreparedStatement = PreparedStatement<HotfixDatabaseConnecti
             StringBuilder stringBuilder = new StringBuilder();
             foreach (var db2Entry in data)
             {
-                string tablename = GetTableName(db2Entry.Key);
-
-                stringBuilder.AppendLine($"CREATE TABLE `{tablename}` (");
-                foreach (var field in  db2Entry.Value)
-                {
-                    string fieldname = field.name;
-                    if (field.type == "LocalizedString")
-                        fieldname = fieldname.Replace("_lang", "");
-
-                    if (field.bigType == "FT_STRING")
-                    {
-                        stringBuilder.AppendLine($"  `{fieldname}` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,");
-                    }
-                    else
-                    {
-                        stringBuilder.Append($" ");
-                        stringBuilder.Append($" `{fieldname}`");
-                        switch (field.bigType)
-                        {
-                            case "FT_FLOAT":
-                                stringBuilder.Append($" FLOAT");
-                                break;
-                            case "FT_LONG":
-                                stringBuilder.Append($" BIGINT");
-                                break;
-                            case "FT_INT":
-                                stringBuilder.Append($" INT");
-                                break;
-                            case "FT_SHORT":
-                                stringBuilder.Append($" SMALLINT");
-                                break;
-                            case "FT_BYTE":
-                                stringBuilder.Append($" TINYINT");
-                                break;
-                        }
-                        if (!field.isSigned)
-                            stringBuilder.Append($" UNSIGNED");
-
-                        stringBuilder.AppendLine($" NOT NULL DEFAULT '0',");
-                    }
-                }
-
-
-                stringBuilder.AppendLine(@"  `VerifiedBuild` int NOT NULL DEFAULT '0',
-  PRIMARY KEY (`ID`,`VerifiedBuild`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
-                stringBuilder.AppendLine();
+                var locale = db2Entry.Value.Where(x => x.type == "LocalizedString").ToArray();
+                WriteCreateHotfixSQLTable(stringBuilder, db2Entry);
+                if (locale.Any())
+                    WriteCreateHotfixSQLLocaleTable(stringBuilder, db2Entry);
             }
 
             File.WriteAllText("hotfix.sql", stringBuilder.ToString());
+        }
+
+        private static void WriteCreateHotfixSQLTable(StringBuilder stringBuilder, KeyValuePair<string, DB2FieldInfo[]> db2Entry)
+        {
+            string keyName = GetTableKeyName(db2Entry);
+            string tablename = GetTableName(db2Entry.Key);
+
+            stringBuilder.AppendLine($"CREATE TABLE `{tablename}` (");
+            foreach (var field in db2Entry.Value)
+            {
+                if (field.arrlength > 0)
+                {
+                    for (int i = 0; i < field.arrlength; ++i)
+                        AppendHotfixSQLField(stringBuilder, tablename, field, i + 1);
+                }
+                else
+                    AppendHotfixSQLField(stringBuilder, tablename, field, 0);
+            }
+
+            stringBuilder.AppendLine($@"  `VerifiedBuild` int NOT NULL DEFAULT '0',
+  PRIMARY KEY (`{keyName}`,`VerifiedBuild`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+            stringBuilder.AppendLine();
+        }
+
+        private static void WriteCreateHotfixSQLLocaleTable(StringBuilder stringBuilder, KeyValuePair<string, DB2FieldInfo[]> db2Entry)
+        {
+            string keyName = GetTableKeyName(db2Entry);
+            string tablename = GetTableName(db2Entry.Key);
+
+            stringBuilder.AppendLine($"CREATE TABLE `{tablename}_locale` (");
+
+            // Append key field first
+            foreach (var field in db2Entry.Value)
+            {
+                if (field.name == keyName)
+                {
+                    AppendHotfixSQLField(stringBuilder, tablename, field, 0);
+                    break;
+                }
+            }
+
+            stringBuilder.AppendLine($"  `locale` VARCHAR(4) NOT NULL COLLATE 'utf8mb4_unicode_ci',");
+
+            foreach (var field in db2Entry.Value)
+            {
+                if (field.bigType != "FT_STRING")
+                    continue;
+
+                string fieldname = field.name;
+                stringBuilder.AppendLine($"  `{fieldname}` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,");
+            }
+
+            stringBuilder.AppendLine($@"  `VerifiedBuild` int NOT NULL DEFAULT '0',
+  PRIMARY KEY (`{keyName}`,`VerifiedBuild`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+            stringBuilder.AppendLine();
+        }
+
+        private static void AppendHotfixSQLField(StringBuilder stringBuilder, string tablename, DB2FieldInfo field, int arrayIndex)
+        {
+            string fieldname = field.name;
+            if (field.type == "LocalizedString")
+                fieldname = fieldname.Replace("_lang", "");
+
+            if (arrayIndex > 0)
+                fieldname += arrayIndex.ToString();
+
+            if (field.bigType == "FT_STRING")
+            {
+                stringBuilder.AppendLine($"  `{fieldname}` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,");
+            }
+            else
+            {
+                stringBuilder.Append($" ");
+                stringBuilder.Append($" `{fieldname}`");
+                switch (field.bigType)
+                {
+                    case "FT_FLOAT":
+                        stringBuilder.Append($" FLOAT");
+                        break;
+                    case "FT_LONG":
+                        stringBuilder.Append($" BIGINT");
+                        break;
+                    case "FT_INT":
+                        stringBuilder.Append($" INT");
+                        break;
+                    case "FT_SHORT":
+                        stringBuilder.Append($" SMALLINT");
+                        break;
+                    case "FT_BYTE":
+                        stringBuilder.Append($" TINYINT");
+                        break;
+                }
+                if (!field.isSigned)
+                    stringBuilder.Append($" UNSIGNED");
+
+                stringBuilder.AppendLine($" NOT NULL DEFAULT '0',");
+            }
         }
 
         static string GetCppLineFromDef(DBDefsLib.Structs.Definition versionDef, DBDefsLib.Structs.ColumnDefinition columnda)
@@ -944,7 +1027,7 @@ using HotfixDatabasePreparedStatement = PreparedStatement<HotfixDatabaseConnecti
             string type = "";
             string bigType = "";
             bool isSigned = versionDef.isSigned;
-            if (versionDef.name == "ID")
+            if (versionDef.name == "ID" || versionDef.isRelation)
             {
                 Debug.Assert(versionDef.size == 32);
                 isSigned = false;
