@@ -972,7 +972,7 @@ using HotfixDatabasePreparedStatement = PreparedStatement<HotfixDatabaseConnecti
             if (arrayIndex > 0)
                 fieldname += arrayIndex.ToString();
 
-            if (field.bigType == "FT_STRING")
+            if (field.bigType == "FT_STRING" || field.bigType == "FT_STRING_NOT_LOCALIZED")
             {
                 stringBuilder.AppendLine($"  `{fieldname}` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,");
             }
@@ -1052,7 +1052,7 @@ using HotfixDatabasePreparedStatement = PreparedStatement<HotfixDatabaseConnecti
                         {
                             Debug.Assert(columnda.type == "string");
                             type += "char const*";
-                            bigType = "FT_STRING";
+                            bigType = "FT_STRING_NOT_LOCALIZED";
                         }
                     }
                     break;
