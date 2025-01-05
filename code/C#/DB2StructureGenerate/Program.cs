@@ -980,10 +980,12 @@ using HotfixDatabasePreparedStatement = PreparedStatement<HotfixDatabaseConnecti
             {
                 stringBuilder.Append($" ");
                 stringBuilder.Append($" `{fieldname}`");
+                bool signed = field.isSigned;
                 switch (field.bigType)
                 {
                     case "FT_FLOAT":
                         stringBuilder.Append($" FLOAT");
+                        signed = true;
                         break;
                     case "FT_LONG":
                         stringBuilder.Append($" BIGINT");
@@ -998,7 +1000,7 @@ using HotfixDatabasePreparedStatement = PreparedStatement<HotfixDatabaseConnecti
                         stringBuilder.Append($" TINYINT");
                         break;
                 }
-                if (!field.isSigned)
+                if (!signed)
                     stringBuilder.Append($" UNSIGNED");
 
                 stringBuilder.AppendLine($" NOT NULL DEFAULT '0',");
